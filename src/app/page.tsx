@@ -1,32 +1,34 @@
-import { fetchWeather, dirLabel, windSummaryHe } from "@/lib/weather";
-import SportBadges from "@/components/SportBadges";
-import WindCompass from "@/components/WindCompass";
+import { fetchWeather } from "@/lib/weather";
 import WindChart from "@/components/WindChart";
 import DayCard from "@/components/DayCard";
 import WindyMap from "@/components/WindyMap";
 import WebcamSection from "@/components/WebcamSection";
-import AutoRefresh from "@/components/AutoRefresh";
+import LiveCard, { type LiveData } from "@/components/LiveCard";
 import Link from "next/link";
 
-export const revalidate = 30;
-
-function WindSpeedBig({ speed, label }: { speed: number; label: string }) {
-  const color =
-    speed >= 12 && speed <= 30
-      ? "text-emerald-400"
-      : speed >= 8
-      ? "text-amber-400"
-      : "text-slate-400";
-  return (
-    <div className="text-center">
-      <div className={`text-5xl font-bold tabular-nums ${color}`}>{Math.round(speed)}</div>
-      <div className="text-slate-400 text-sm mt-1">{label}</div>
-    </div>
-  );
-}
+export const revalidate = 1800;
 
 export default async function HomePage() {
-  const { current, hourly, days } = await fetchWeather();
+  // Fetch forecast + initial live data in parallel
+  const [{ hourly, days, current }, liveRes] = await Promise.all([
+    fetchWeather(),
+    fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3001"}/api/current`, {
+      cache: "no-store",
+    }).catch(() => null),
+  ]);
+
+  const initial: LiveData = liveRes?.ok
+    ? await liveRes.json()
+    : {
+        time: current.time,
+        temperature: current.temperature,
+        humidity: null,
+        pressure: null,
+        winddir: current.winddirection,
+        windspeed: current.windspeed,
+        windgust: current.windgust ?? null,
+        source: "open-meteo-fallback",
+      };
 
   const next24h = hourly
     .filter((h) => new Date(h.time) >= new Date(current.time))
@@ -34,50 +36,13 @@ export default async function HomePage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-10">
-      <AutoRefresh intervalMs={30000} />
-      {/* Hero */}
+      {/* Live hero */}
       <section>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-emerald-400 text-sm font-medium">Live · Eilat, Israel</span>
-        </div>
-        <h1 className="text-3xl font-bold text-white mb-6">Wind right now</h1>
-
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-          <div className="flex flex-wrap items-center gap-8 mb-6">
-            <WindCompass direction={current.winddirection} size={96} />
-            <div className="flex gap-6 flex-wrap">
-              <WindSpeedBig speed={current.windspeed} label="Wind (kt)" />
-              {current.windgust != null && (
-                <WindSpeedBig speed={current.windgust} label="Gusts (kt)" />
-              )}
-              <div className="text-center">
-                <div className="text-5xl font-bold text-slate-300">{dirLabel(current.winddirection)}</div>
-                <div className="text-slate-400 text-sm mt-1">Direction</div>
-              </div>
-              <div className="text-center">
-                <div className="text-5xl font-bold text-slate-300">{Math.round(current.temperature)}°</div>
-                <div className="text-slate-400 text-sm mt-1">Temp (°C)</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Hebrew wind summary */}
-          <div
-            dir="rtl"
-            lang="he"
-            className="mt-5 rounded-lg bg-slate-800/60 border border-slate-700 px-4 py-3 text-right text-slate-200 text-sm leading-relaxed"
-          >
-            {windSummaryHe(current.windspeed, current.winddirection, current.windgust)}
-          </div>
-
-          <div className="mt-4">
-            <SportBadges windspeed={current.windspeed} large />
-          </div>
-        </div>
+        <h1 className="text-3xl font-bold text-white mb-4">Wind right now</h1>
+        <LiveCard initial={initial} />
       </section>
 
-      {/* Next 24h chart */}
+      {/* Next 24h forecast chart */}
       <section>
         <h2 className="text-xl font-bold text-white mb-4">Next 24 hours</h2>
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4">
