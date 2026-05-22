@@ -3,7 +3,7 @@ import { SPORTS, rate, RATING_STYLES } from "@/lib/suitability";
 import WindChart from "@/components/WindChart";
 import SportBadges from "@/components/SportBadges";
 
-export const revalidate = 1800;
+export const dynamic = "force-dynamic";
 
 export default async function ForecastPage() {
   const { days } = await fetchWeather();
