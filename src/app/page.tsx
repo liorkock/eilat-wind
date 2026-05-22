@@ -1,65 +1,100 @@
-import Image from "next/image";
+import { fetchWeather, dirLabel } from "@/lib/weather";
+import SportBadges from "@/components/SportBadges";
+import WindCompass from "@/components/WindCompass";
+import WindChart from "@/components/WindChart";
+import DayCard from "@/components/DayCard";
+import WindyMap from "@/components/WindyMap";
+import WebcamSection from "@/components/WebcamSection";
+import Link from "next/link";
 
-export default function Home() {
+export const revalidate = 1800;
+
+function WindSpeedBig({ speed, label }: { speed: number; label: string }) {
+  const color =
+    speed >= 12 && speed <= 30
+      ? "text-emerald-400"
+      : speed >= 8
+      ? "text-amber-400"
+      : "text-slate-400";
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="text-center">
+      <div className={`text-5xl font-bold tabular-nums ${color}`}>{Math.round(speed)}</div>
+      <div className="text-slate-400 text-sm mt-1">{label}</div>
+    </div>
+  );
+}
+
+export default async function HomePage() {
+  const { current, hourly, days } = await fetchWeather();
+
+  const next24h = hourly
+    .filter((h) => new Date(h.time) >= new Date(current.time))
+    .slice(0, 24);
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-8 space-y-10">
+      {/* Hero */}
+      <section>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-emerald-400 text-sm font-medium">Live · Eilat, Israel</span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <h1 className="text-3xl font-bold text-white mb-6">Wind right now</h1>
+
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+          <div className="flex flex-wrap items-center gap-8 mb-6">
+            <WindCompass direction={current.winddirection} size={96} />
+            <div className="flex gap-6 flex-wrap">
+              <WindSpeedBig speed={current.windspeed} label="Wind (kt)" />
+              {current.windgust != null && (
+                <WindSpeedBig speed={current.windgust} label="Gusts (kt)" />
+              )}
+              <div className="text-center">
+                <div className="text-5xl font-bold text-slate-300">{dirLabel(current.winddirection)}</div>
+                <div className="text-slate-400 text-sm mt-1">Direction</div>
+              </div>
+              <div className="text-center">
+                <div className="text-5xl font-bold text-slate-300">{Math.round(current.temperature)}°</div>
+                <div className="text-slate-400 text-sm mt-1">Temp (°C)</div>
+              </div>
+            </div>
+          </div>
+
+          <SportBadges windspeed={current.windspeed} large />
         </div>
-      </main>
+      </section>
+
+      {/* Next 24h chart */}
+      <section>
+        <h2 className="text-xl font-bold text-white mb-4">Next 24 hours</h2>
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4">
+          <WindChart hours={next24h} />
+        </div>
+      </section>
+
+      {/* 7-day overview */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-white">7-Day Forecast</h2>
+          <Link href="/forecast" className="text-cyan-400 text-sm hover:text-cyan-300 transition-colors">
+            See all 16 days →
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {days.slice(0, 7).map((day, i) => (
+            <DayCard key={day.date} day={day} index={i} isToday={i === 0} />
+          ))}
+        </div>
+      </section>
+
+      {/* Windy map */}
+      <section>
+        <h2 className="text-xl font-bold text-white mb-4">🗺️ Wind Map</h2>
+        <WindyMap />
+      </section>
+
+      {/* Webcams & resources */}
+      <WebcamSection />
     </div>
   );
 }
