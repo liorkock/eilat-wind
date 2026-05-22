@@ -1,4 +1,4 @@
-import { fetchWeather, dirLabel } from "@/lib/weather";
+import { fetchWeather, dirLabel, windSummaryHe } from "@/lib/weather";
 import SportBadges from "@/components/SportBadges";
 import WindCompass from "@/components/WindCompass";
 import WindChart from "@/components/WindChart";
@@ -60,7 +60,18 @@ export default async function HomePage() {
             </div>
           </div>
 
-          <SportBadges windspeed={current.windspeed} large />
+          {/* Hebrew wind summary */}
+          <div
+            dir="rtl"
+            lang="he"
+            className="mt-5 rounded-lg bg-slate-800/60 border border-slate-700 px-4 py-3 text-right text-slate-200 text-sm leading-relaxed"
+          >
+            {windSummaryHe(current.windspeed, current.winddirection, current.windgust)}
+          </div>
+
+          <div className="mt-4">
+            <SportBadges windspeed={current.windspeed} large />
+          </div>
         </div>
       </section>
 

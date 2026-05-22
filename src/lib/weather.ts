@@ -112,6 +112,26 @@ export function dirLabel(deg: number): string {
   return labels[Math.round(deg / 22.5) % 16];
 }
 
+const HE_DIRS: Record<string, string> = {
+  N: 'צפון', NNE: 'צפון-צפון-מזרח', NE: 'צפון-מזרח', ENE: 'מזרח-צפון-מזרח',
+  E: 'מזרח', ESE: 'מזרח-דרום-מזרח', SE: 'דרום-מזרח', SSE: 'דרום-דרום-מזרח',
+  S: 'דרום', SSW: 'דרום-דרום-מערב', SW: 'דרום-מערב', WSW: 'מערב-דרום-מערב',
+  W: 'מערב', WNW: 'מערב-צפון-מערב', NW: 'צפון-מערב', NNW: 'צפון-צפון-מערב',
+};
+
+export function windSummaryHe(windspeed: number, winddirection: number, windgust?: number): string {
+  const dir = HE_DIRS[dirLabel(winddirection)] ?? dirLabel(winddirection);
+  const speed = Math.round(windspeed);
+  const gust = windgust != null ? Math.round(windgust) : null;
+
+  let summary = `רוח מכיוון ${dir}, עוצמה ${speed} קשרים`;
+  if (gust && gust > speed) {
+    summary += `, נשיבות עד ${gust} קשרים`;
+  }
+  summary += '.';
+  return summary;
+}
+
 export function formatTime(isoTime: string): string {
   return new Date(isoTime).toLocaleTimeString('en-IL', {
     hour: '2-digit',
