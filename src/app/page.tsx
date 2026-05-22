@@ -5,9 +5,10 @@ import WindChart from "@/components/WindChart";
 import DayCard from "@/components/DayCard";
 import WindyMap from "@/components/WindyMap";
 import WebcamSection from "@/components/WebcamSection";
+import AutoRefresh from "@/components/AutoRefresh";
 import Link from "next/link";
 
-export const revalidate = 1800;
+export const revalidate = 30;
 
 function WindSpeedBig({ speed, label }: { speed: number; label: string }) {
   const color =
@@ -33,6 +34,7 @@ export default async function HomePage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-10">
+      <AutoRefresh intervalMs={30000} />
       {/* Hero */}
       <section>
         <div className="flex items-center gap-2 mb-1">

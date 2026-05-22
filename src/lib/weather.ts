@@ -46,7 +46,7 @@ export async function fetchWeather(): Promise<WeatherData> {
   });
 
   const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
-    next: { revalidate: 1800 },
+    next: { revalidate: 30 },
   });
   if (!res.ok) throw new Error(`Weather API ${res.status}`);
 
