@@ -3,10 +3,15 @@ import { SPORTS, rate, RATING_STYLES } from "@/lib/suitability";
 import WindChart from "@/components/WindChart";
 import SportBadges from "@/components/SportBadges";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 1800;
 
 export default async function ForecastPage() {
-  const { days } = await fetchWeather();
+  let days: Awaited<ReturnType<typeof fetchWeather>>["days"] = [];
+  try {
+    ({ days } = await fetchWeather());
+  } catch {
+    // Build-time network failure — render empty; ISR will populate on first request
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">

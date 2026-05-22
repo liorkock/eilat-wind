@@ -6,26 +6,43 @@ import WebcamSection from "@/components/WebcamSection";
 import LiveCard, { type LiveData } from "@/components/LiveCard";
 import Link from "next/link";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 1800;
+
+const FALLBACK_INITIAL: LiveData = {
+  time: "--:--",
+  temperature: 0,
+  humidity: null,
+  pressure: null,
+  winddir: 0,
+  windspeed: 0,
+  windgust: null,
+  source: "loading",
+};
 
 export default async function HomePage() {
-  const { hourly, days, current } = await fetchWeather();
+  let hourly: Awaited<ReturnType<typeof fetchWeather>>["hourly"] = [];
+  let days: Awaited<ReturnType<typeof fetchWeather>>["days"] = [];
+  let initial: LiveData = FALLBACK_INITIAL;
 
-  // Seed LiveCard with Open-Meteo data; client-side polling replaces it with meteo-tech within 30s
-  const initial: LiveData = {
-    time: current.time.slice(11, 16), // HH:MM from ISO
-    temperature: current.temperature,
-    humidity: null,
-    pressure: null,
-    winddir: current.winddirection,
-    windspeed: current.windspeed,
-    windgust: current.windgust ?? null,
-    source: "open-meteo",
-  };
+  try {
+    const { hourly: h, days: d, current } = await fetchWeather();
+    hourly = h;
+    days = d;
+    initial = {
+      time: current.time.slice(11, 16),
+      temperature: current.temperature,
+      humidity: null,
+      pressure: null,
+      winddir: current.winddirection,
+      windspeed: current.windspeed,
+      windgust: current.windgust ?? null,
+      source: "open-meteo",
+    };
+  } catch {
+    // Build-time failure — LiveCard will populate via client polling within 30s
+  }
 
-  const next24h = hourly
-    .filter((h) => new Date(h.time) >= new Date(current.time))
-    .slice(0, 24);
+  const next24h = hourly.slice(0, 24);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-10">
