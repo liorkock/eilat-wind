@@ -25,21 +25,22 @@ export default async function HomePage() {
   let initial: LiveData = FALLBACK_INITIAL;
 
   try {
-    const { hourly: h, days: d, current } = await fetchWeather();
+    const { hourly: h, days: d } = await fetchWeather();
     hourly = h;
     days = d;
-    initial = {
-      time: current.time.slice(11, 16),
-      temperature: current.temperature,
-      humidity: null,
-      pressure: null,
-      winddir: current.winddirection,
-      windspeed: current.windspeed,
-      windgust: current.windgust ?? null,
-      source: "open-meteo",
-    };
   } catch {
-    // Build-time failure — LiveCard will populate via client polling within 30s
+    // Forecast data unavailable at build time — charts will be empty
+  }
+
+  // Fetch real-time data for the initial render (METAR station data)
+  try {
+    const base = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3001";
+    const res = await fetch(`${base}/api/current`, { cache: "no-store" });
+    if (res.ok) initial = await res.json() as LiveData;
+  } catch {
+    // LiveCard will populate via client polling within 30s
   }
 
   const next24h = hourly.slice(0, 24);
