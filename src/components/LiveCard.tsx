@@ -18,6 +18,16 @@ export interface LiveData {
 
 const POLL_MS = 30_000;
 
+function isLive(source: string) {
+  return source === "meteo-tech" || source === "meteo-tech-daily" || source === "ims";
+}
+
+function sourceLabel(source: string) {
+  if (source === "meteo-tech" || source === "meteo-tech-daily") return "Live · Meteo-Tech Eilat";
+  if (source === "ims") return "Live · IMS Ramon Airport";
+  return "⚠ Forecast model · Open-Meteo";
+}
+
 function BigStat({ value, unit, label, color }: { value: string; unit?: string; label: string; color?: string }) {
   return (
     <div className="text-center">
@@ -67,8 +77,8 @@ export default function LiveCard({ initial }: { initial: LiveData }) {
       <div className="flex items-center justify-between mb-5 text-xs text-slate-500">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${stale ? "bg-amber-500" : "bg-emerald-400 animate-pulse"}`} />
-          <span className={stale ? "text-amber-400" : data.source === "meteo-tech" || data.source === "meteo-tech-daily" ? "text-emerald-400" : "text-amber-400"}>
-            {stale ? "Reconnecting…" : data.source === "meteo-tech" || data.source === "meteo-tech-daily" ? "Live · Meteo-Tech Eilat" : "⚠ Forecast model · Open-Meteo"}
+          <span className={stale ? "text-amber-400" : isLive(data.source) ? "text-emerald-400" : "text-amber-400"}>
+            {stale ? "Reconnecting…" : sourceLabel(data.source)}
           </span>
         </div>
         <span>
