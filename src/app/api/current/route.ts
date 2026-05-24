@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const runtime = "edge";
+
 const CURRENT_URL = "https://www.meteo-tech.co.il/eilat-yam/eilat_he.asp";
 const DAILY_URL   = "https://www.meteo-tech.co.il/eilat-yam/eilat_daily.asp";
 const MS_TO_KT = 1.94384;
