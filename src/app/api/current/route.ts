@@ -9,6 +9,36 @@ function extractTds(rowHtml: string): string[] {
     .map((m) => m[1].replace(/<[^>]+>/g, "").trim());
 }
 
+/**
+ * eilat_he.asp column layout (0-based, 13 columns total):
+ *   0: Time (DD/MM HH:MM)
+ *   1: Temperature (°C)
+ *   2: Humidity (%)
+ *   3: DewPoint (°C)
+ *   4: Pressure (hPa) — typically 950–1050
+ *   5: Solar/PAR
+ *   6: (radiation sensor)
+ *   7: (radiation sensor)
+ *   8: WindDir (degrees 0–360)
+ *   9: WindSpeed (m/s)
+ *  10: WindGust (m/s)
+ *  11: Visibility (km)
+ *  12: SeaTemp (°C)
+ */
+function isDataRow(r: string[]): boolean {
+  if (r.length < 11) return false;
+  // Must have a date/time-like value in first cell (contains "/" and ":")
+  const t = r[0] ?? "";
+  if (!t.includes("/") && !t.includes(":")) return false;
+  // Pressure at index 4 should be in realistic range
+  const pressure = parseFloat(r[4] ?? "");
+  if (isNaN(pressure) || pressure < 900 || pressure > 1100) return false;
+  // Wind speed at index 9 should be numeric and reasonable
+  const ws = parseFloat(r[9] ?? "");
+  if (isNaN(ws) || ws < 0 || ws > 60) return false;
+  return true;
+}
+
 export async function GET() {
   try {
     const res = await fetch(CURRENT_URL, {
@@ -26,23 +56,19 @@ export async function GET() {
       extractTds(m[1])
     );
 
-    // eilat_he.asp time format: "DD/MM HH:MM"
-    // Columns (0-based): Time | Temp | Humidity | DewPoint | Pressure | Solar | ? | ? | WindDir | WindSpeed(m/s) | WindGust(m/s) | Visibility | SeaTemp
-    const dataRows = rows.filter(
-      (r) =>
-        /^\d{2}\/\d{2} \d{2}:\d{2}$/.test(r[0] ?? "") &&
-        !isNaN(parseFloat(r[9] ?? ""))
-    );
+    const dataRows = rows.filter(isDataRow);
 
     if (dataRows.length === 0) throw new Error("no data rows found");
 
+    // Use the last (most recent) data row
     const r = dataRows[dataRows.length - 1];
 
     const windspeed = parseFloat(r[9]);
     const windgust = parseFloat(r[10]);
 
-    // Extract time portion "HH:MM" from "DD/MM HH:MM"
-    const timePart = (r[0] ?? "").split(" ")[1] ?? r[0];
+    // Extract HH:MM from time cell (format: "DD/MM HH:MM" or just "HH:MM")
+    const timeMatch = (r[0] ?? "").match(/(\d{2}:\d{2})$/);
+    const timePart = timeMatch ? timeMatch[1] : r[0];
 
     return NextResponse.json(
       {
@@ -80,11 +106,12 @@ export async function GET() {
           windspeed: c.windspeed_10m,
           windgust: c.windgusts_10m,
           source: "open-meteo-fallback",
+          scrapeError: String(err),
         },
         { headers: { "Cache-Control": "no-store, max-age=0" } }
       );
-    } catch {
-      return NextResponse.json({ error: String(err) }, { status: 502 });
+    } catch (fallbackErr) {
+      return NextResponse.json({ error: String(err), fallbackError: String(fallbackErr) }, { status: 502 });
     }
   }
 }
