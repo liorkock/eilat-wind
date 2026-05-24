@@ -1,0 +1,129 @@
+name: Fetch Eilat Weather
+
+# Runs every 5 minutes and stores the result in Vercel KV
+# GitHub's servers are not blocked by meteo-tech.co.il's Cloudflare protection
+# Setup: add KV_REST_API_URL and KV_REST_API_TOKEN to GitHub repo secrets
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch & store Eilat weather
+        run: |
+          node << 'EOF'
+          const https = require('https');
+          const http = require('http');
+
+          const MS_TO_KT = 1.94384;
+
+          function fetch_url(url) {
+            return new Promise((resolve, reject) => {
+              const mod = url.startsWith('https') ? https : http;
+              const req = mod.get(url, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  'Accept': 'text/html,application/xhtml+xml',
+                  'Accept-Language': 'he-IL,he;q=0.9',
+                  'Referer': 'http://www.meteo-tech.co.il/eilat-yam/',
+                }
+              }, (res) => {
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                  return resolve(fetch_url(res.headers.location));
+                }
+                const chunks = [];
+                res.on('data', c => chunks.push(c));
+                res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
+              });
+              req.on('error', reject);
+            });
+          }
+
+          function extractTds(html) {
+            const isoDecoded = html.toString('latin1');
+            const tdMatches = [...isoDecoded.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+            return tdMatches.map(m => m[1].replace(/<[^>]+>/g, '').trim());
+          }
+
+          function findPressureIdx(vals) {
+            return vals.findIndex(v => { const n = parseFloat(v); return !isNaN(n) && n >= 950 && n <= 1100; });
+          }
+
+          async function parseWeatherPage(url) {
+            const { status, body } = await fetch_url(url);
+            if (status !== 200) throw new Error(`HTTP ${status}`);
+            const tds = extractTds(body);
+            // Find pressure as anchor
+            const pIdx = findPressureIdx(tds);
+            if (pIdx < 2) throw new Error(`No pressure found. TDs: ${tds.slice(0,20).join(',')}`);
+
+            const windspeed = parseFloat(tds[pIdx + 3]);
+            const windgust  = parseFloat(tds[pIdx + 4]);
+            const winddir   = parseFloat(tds[pIdx + 2]);
+            if (isNaN(windspeed) || isNaN(winddir)) throw new Error(`Bad wind values at pIdx=${pIdx}`);
+
+            const timeCell = tds.find(v => /\d{2}:\d{2}/.test(v)) || '';
+            const timeMatch = timeCell.match(/(\d{2}:\d{2})$/);
+
+            return {
+              time: timeMatch ? timeMatch[1] : timeCell,
+              temperature: parseFloat(tds[pIdx - 3]) || null,
+              humidity:    parseFloat(tds[pIdx - 2]) || null,
+              pressure:    parseFloat(tds[pIdx])     || null,
+              winddir,
+              windspeed: Math.round(windspeed * MS_TO_KT * 10) / 10,
+              windgust:  isNaN(windgust) ? null : Math.round(windgust * MS_TO_KT * 10) / 10,
+              source: 'meteo-tech',
+              fetchedAt: new Date().toISOString(),
+            };
+          }
+
+          async function storeInKV(data) {
+            const kvUrl = process.env.KV_REST_API_URL;
+            const kvToken = process.env.KV_REST_API_TOKEN;
+            if (!kvUrl || !kvToken) { console.log('KV not configured, skipping store'); return; }
+
+            const payload = JSON.stringify({ value: JSON.stringify(data), ex: 600 });
+            const url = new URL('/set/eilat_weather', kvUrl);
+            await new Promise((resolve, reject) => {
+              const req = https.request(url, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${kvToken}`,
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(payload),
+                }
+              }, res => { res.resume(); res.on('end', resolve); });
+              req.on('error', reject);
+              req.write(payload);
+              req.end();
+            });
+            console.log('Stored in Vercel KV:', JSON.stringify(data));
+          }
+
+          (async () => {
+            const urls = [
+              'http://www.meteo-tech.co.il/eilat-yam/eilat_he.asp',
+              'http://www.meteo-tech.co.il/eilat-yam/eilat_daily.asp',
+            ];
+            for (const url of urls) {
+              try {
+                const data = await parseWeatherPage(url);
+                console.log('Parsed:', JSON.stringify(data));
+                await storeInKV(data);
+                process.exit(0);
+              } catch (e) {
+                console.error(`Failed ${url}: ${e.message}`);
+              }
+            }
+            console.error('All sources failed');
+            process.exit(1);
+          })();
+          EOF
+        env:
+          KV_REST_API_URL: ${{ secrets.KV_REST_API_URL }}
+          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}

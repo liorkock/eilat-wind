@@ -67,8 +67,8 @@ export default function LiveCard({ initial }: { initial: LiveData }) {
       <div className="flex items-center justify-between mb-5 text-xs text-slate-500">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${stale ? "bg-amber-500" : "bg-emerald-400 animate-pulse"}`} />
-          <span className={stale ? "text-amber-400" : "text-emerald-400"}>
-            {stale ? "Reconnecting…" : "Live · Meteo-Tech Eilat"}
+          <span className={stale ? "text-amber-400" : data.source === "meteo-tech" || data.source === "meteo-tech-daily" ? "text-emerald-400" : "text-amber-400"}>
+            {stale ? "Reconnecting…" : data.source === "meteo-tech" || data.source === "meteo-tech-daily" ? "Live · Meteo-Tech Eilat" : "⚠ Forecast model · Open-Meteo"}
           </span>
         </div>
         <span>
