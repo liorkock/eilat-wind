@@ -3,7 +3,11 @@ import { NextResponse } from "next/server";
 export const runtime = "edge";
 
 // ─── Data source URLs ───────────────────────────────────────────────────────
-// IMS (Israel Met Service) public XML – updated hourly, no auth, accessible from Vercel
+// NOAA Aviation Weather METAR – updated hourly, no auth, US gov open data, accessible from Vercel
+// LLER = Eilat Airport (Israel) – real measured wind, pressure, temperature
+const METAR_URL = "https://aviationweather.gov/api/data/metar?ids=LLER,LLET&format=json&hours=2";
+
+// IMS (Israel Met Service) public XML – IP-blocked from Vercel (returns 404)
 const IMS_XML_URL = "https://ims.gov.il/sites/default/files/ims_data/xml_files/observ.xml";
 
 // GitHub Gist – populated every 5 min by GitHub Actions fetching meteo-tech.co.il
@@ -15,6 +19,47 @@ const METEO_TECH_URL = "http://www.meteo-tech.co.il/eilat-yam/eilat_he.asp";
 const METEO_DAILY_URL = "http://www.meteo-tech.co.il/eilat-yam/eilat_daily.asp";
 
 const MS_TO_KT = 1.94384;
+
+// ─── METAR (NOAA Aviation Weather) ──────────────────────────────────────────
+interface MetarObs {
+  wdir: number;
+  wspd: number;
+  wgst?: number;
+  temp: number;
+  dewp?: number;
+  altim?: number;
+  obsTime?: number;
+  receiptTime?: string;
+}
+
+async function fetchMetarData() {
+  const res = await fetch(METAR_URL, { cache: "no-store" });
+  if (!res.ok) throw new Error(`METAR HTTP ${res.status}`);
+  const data = await res.json() as MetarObs[];
+  if (!data?.length) throw new Error("METAR: empty response");
+
+  // Use the most recent observation
+  const obs = data[0];
+  if (obs.wspd == null || obs.wdir == null) throw new Error("METAR: missing wind data");
+
+  // Extract HH:MM from receiptTime or obsTime
+  let timePart = "";
+  if (obs.receiptTime) {
+    const m = obs.receiptTime.match(/(\d{2}:\d{2})/);
+    if (m) timePart = m[1];
+  }
+
+  return {
+    time: timePart,
+    temperature: obs.temp ?? null,
+    humidity: null,
+    pressure: obs.altim ?? null,
+    winddir: obs.wdir,
+    windspeed: obs.wspd,          // already in knots
+    windgust: obs.wgst ?? null,   // already in knots
+    source: "metar-eilat" as const,
+  };
+}
 
 // ─── IMS XML parser ──────────────────────────────────────────────────────────
 // IMS stations near Eilat (preference order):
@@ -181,21 +226,28 @@ export async function GET(request: Request) {
 
   if (debug) {
     const results: Record<string, unknown> = {};
-    try { results.ims = await fetchImsData(); } catch (e) { results.imsError = String(e); }
+    try { results.metar = await fetchMetarData(); } catch (e) { results.metarError = String(e); }
     try { results.gist = await fetchGistData(); } catch (e) { results.gistError = String(e); }
+    try { results.ims = await fetchImsData(); } catch (e) { results.imsError = String(e); }
     return NextResponse.json(results);
   }
 
   const errors: string[] = [];
 
-  // Priority 1: GitHub Gist (meteo-tech data via GitHub Actions)
-  // Note: GitHub Actions is also blocked by Cloudflare; gist will be stale/missing
+  // Priority 1: GitHub Gist (meteo-tech station, updated every 5 min by GitHub Actions)
+  // Note: GitHub Actions is also blocked by Cloudflare so gist currently stays stale
   try {
     const data = await fetchGistData();
     return NextResponse.json({ ...data }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (e) { errors.push(`Gist: ${e}`); }
 
-  // Priority 2: IMS XML (Israel Met Service – real station data, accessible from Vercel)
+  // Priority 2: NOAA METAR – real measured data from Eilat airport, updated hourly
+  try {
+    const data = await fetchMetarData();
+    return NextResponse.json({ ...data }, { headers: { "Cache-Control": "no-store, max-age=0" } });
+  } catch (e) { errors.push(`METAR: ${e}`); }
+
+  // Priority 3: IMS XML (IP-blocked from Vercel, but try anyway)
   try {
     const data = await fetchImsData();
     return NextResponse.json({ ...data }, { headers: { "Cache-Control": "no-store, max-age=0" } });

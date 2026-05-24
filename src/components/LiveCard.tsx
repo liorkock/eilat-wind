@@ -19,12 +19,13 @@ export interface LiveData {
 const POLL_MS = 30_000;
 
 function isLive(source: string) {
-  return source === "meteo-tech" || source === "meteo-tech-daily" || source === "ims";
+  return ["meteo-tech", "meteo-tech-daily", "ims", "metar-eilat"].includes(source);
 }
 
 function sourceLabel(source: string) {
   if (source === "meteo-tech" || source === "meteo-tech-daily") return "Live · Meteo-Tech Eilat";
   if (source === "ims") return "Live · IMS Ramon Airport";
+  if (source === "metar-eilat") return "Live · Eilat Airport (METAR)";
   return "⚠ Forecast model · Open-Meteo";
 }
 
