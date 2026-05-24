@@ -30,17 +30,7 @@ export default async function HomePage() {
     days = d;
   } catch {
     // Forecast data unavailable at build time — charts will be empty
-  }
-
-  // Fetch real-time data for the initial render (METAR station data)
-  try {
-    const base = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3001";
-    const res = await fetch(`${base}/api/current`, { cache: "no-store" });
-    if (res.ok) initial = await res.json() as LiveData;
-  } catch {
-    // LiveCard will populate via client polling within 30s
+    // LiveCard will populate via client polling immediately on mount
   }
 
   const next24h = hourly.slice(0, 24);

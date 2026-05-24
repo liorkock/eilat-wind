@@ -66,6 +66,7 @@ export default function LiveCard({ initial }: { initial: LiveData }) {
   }, []);
 
   useEffect(() => {
+    poll(); // fetch immediately on mount
     const id = setInterval(poll, POLL_MS);
     return () => clearInterval(id);
   }, [poll]);
