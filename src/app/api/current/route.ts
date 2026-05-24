@@ -95,7 +95,15 @@ function parseImsXml(xml: string): ImsData | null {
 }
 
 async function fetchImsData(): Promise<ImsData> {
-  const res = await fetch(IMS_XML_URL, { cache: "no-store" });
+  const res = await fetch(IMS_XML_URL, {
+    cache: "no-store",
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Accept": "text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8",
+      "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8",
+      "Referer": "https://ims.gov.il/he/CurrentDataXML",
+    },
+  });
   if (!res.ok) throw new Error(`IMS HTTP ${res.status}`);
   const xml = await res.text();
   const data = parseImsXml(xml);
