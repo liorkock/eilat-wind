@@ -10,36 +10,20 @@ function extractTds(rowHtml: string): string[] {
 }
 
 /**
- * eilat_he.asp column layout (0-based, 13 columns total):
- *   0: Time (DD/MM HH:MM)
- *   1: Temperature (°C)
- *   2: Humidity (%)
- *   3: DewPoint (°C)
- *   4: Pressure (hPa) — typically 950–1050
- *   5: Solar/PAR
- *   6: (radiation sensor)
- *   7: (radiation sensor)
- *   8: WindDir (degrees 0–360)
- *   9: WindSpeed (m/s)
- *  10: WindGust (m/s)
- *  11: Visibility (km)
- *  12: SeaTemp (°C)
+ * Find the index of a value within a plausible pressure range (950–1050).
+ * Returns -1 if not found.
  */
-function isDataRow(r: string[]): boolean {
-  if (r.length < 11) return false;
-  // Must have a date/time-like value in first cell (contains "/" and ":")
-  const t = r[0] ?? "";
-  if (!t.includes("/") && !t.includes(":")) return false;
-  // Pressure at index 4 should be in realistic range
-  const pressure = parseFloat(r[4] ?? "");
-  if (isNaN(pressure) || pressure < 900 || pressure > 1100) return false;
-  // Wind speed at index 9 should be numeric and reasonable
-  const ws = parseFloat(r[9] ?? "");
-  if (isNaN(ws) || ws < 0 || ws > 60) return false;
-  return true;
+function findPressureIdx(r: string[]): number {
+  return r.findIndex((v) => {
+    const n = parseFloat(v);
+    return !isNaN(n) && n >= 950 && n <= 1100;
+  });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const debug = searchParams.get("debug") === "1";
+
   try {
     const res = await fetch(CURRENT_URL, {
       cache: "no-store",
@@ -48,38 +32,55 @@ export async function GET() {
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    // Decode as iso-8859-1 — Hebrew page encoding
     const html = new TextDecoder("iso-8859-1").decode(await res.arrayBuffer());
 
-    // Extract all <tr> blocks and their TD values
     const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((m) =>
       extractTds(m[1])
     );
 
-    const dataRows = rows.filter(isDataRow);
+    if (debug) {
+      return NextResponse.json({ rowCount: rows.length, rows: rows.slice(0, 20) });
+    }
 
-    if (dataRows.length === 0) throw new Error("no data rows found");
+    // Find the data row: must contain a pressure value (950–1100) and have enough columns
+    const dataRows = rows.filter((r) => r.length >= 8 && findPressureIdx(r) !== -1);
 
-    // Use the last (most recent) data row
+    if (dataRows.length === 0) throw new Error(`no data rows found (total rows: ${rows.length})`);
+
     const r = dataRows[dataRows.length - 1];
+    const pIdx = findPressureIdx(r);
 
-    const windspeed = parseFloat(r[9]);
-    const windgust = parseFloat(r[10]);
+    // Layout relative to pressure index (pIdx):
+    //   pIdx-3: Temp, pIdx-2: Humidity, pIdx-1: (dewpoint or other), pIdx: Pressure
+    // After pressure: Solar, ?, ?, WindDir, WindSpeed(m/s), WindGust(m/s), ...
+    // Based on observed data at 09:20:
+    //   r[1]=Temp, r[2]=Humidity, r[3]=DewPoint, r[4]=Pressure → pIdx=4
+    //   r[8]=WindDir, r[9]=WindSpeed m/s, r[10]=WindGust m/s
+    const tempIdx = pIdx - 3;
+    const humIdx  = pIdx - 2;
+    const wdirIdx = pIdx + 4;
+    const wspIdx  = pIdx + 5;
+    const wguIdx  = pIdx + 6;
 
-    // Extract HH:MM from time cell (format: "DD/MM HH:MM" or just "HH:MM")
-    const timeMatch = (r[0] ?? "").match(/(\d{2}:\d{2})$/);
-    const timePart = timeMatch ? timeMatch[1] : r[0];
+    const windspeed = parseFloat(r[wspIdx] ?? "");
+    const windgust  = parseFloat(r[wguIdx] ?? "");
+
+    // Time: look for a cell containing ":" (HH:MM) or "/" (date)
+    const timeCell = r.find((v) => /\d{2}:\d{2}/.test(v)) ?? "";
+    const timeMatch = timeCell.match(/(\d{2}:\d{2})$/);
+    const timePart = timeMatch ? timeMatch[1] : timeCell;
 
     return NextResponse.json(
       {
         time: timePart,
-        temperature: parseFloat(r[1]),
-        humidity: parseFloat(r[2]),
-        pressure: parseFloat(r[4]),
-        winddir: parseFloat(r[8]),
+        temperature: parseFloat(r[tempIdx] ?? ""),
+        humidity: parseFloat(r[humIdx] ?? ""),
+        pressure: parseFloat(r[pIdx] ?? ""),
+        winddir: parseFloat(r[wdirIdx] ?? ""),
         windspeed: Math.round(windspeed * MS_TO_KT * 10) / 10,
         windgust: isNaN(windgust) ? null : Math.round(windgust * MS_TO_KT * 10) / 10,
         source: "meteo-tech",
+        _idx: debug ? { pIdx, tempIdx, humIdx, wdirIdx, wspIdx, wguIdx, row: r } : undefined,
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
