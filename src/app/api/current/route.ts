@@ -4,9 +4,13 @@ export const runtime = "edge";
 
 // meteo-tech.co.il is behind Cloudflare which blocks datacenter IPs (Vercel, etc.)
 // Data is populated every 5 min by GitHub Actions (.github/workflows/fetch-weather.yml)
-// which runs on GitHub's servers (not blocked) and stores in Vercel KV.
+// which runs on GitHub's servers (not blocked) and stores in a GitHub Gist.
 const CURRENT_URL = "http://www.meteo-tech.co.il/eilat-yam/eilat_he.asp";
 const DAILY_URL   = "http://www.meteo-tech.co.il/eilat-yam/eilat_daily.asp";
+
+// GitHub Gist raw URL — updated every 5 min by Actions
+// Cache-busted with timestamp so CDN doesn't serve stale data
+const GIST_RAW = "https://gist.githubusercontent.com/liorkock/4f4cb7be778600828312b7b84263c356/raw/weather.json";
 const MS_TO_KT = 1.94384;
 
 const BROWSER_HEADERS = {
@@ -69,24 +73,18 @@ async function scrapeUrl(url: string) {
   return parsed;
 }
 
-async function readFromKV() {
-  const kvUrl = process.env.KV_REST_API_URL;
-  const kvToken = process.env.KV_REST_API_TOKEN;
-  if (!kvUrl || !kvToken) throw new Error("KV not configured");
-
-  const res = await fetch(`${kvUrl}/get/eilat_weather`, {
-    headers: { Authorization: `Bearer ${kvToken}` },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`KV HTTP ${res.status}`);
-  const { result } = await res.json() as { result: string | null };
-  if (!result) throw new Error("KV empty");
-  const data = JSON.parse(result);
+async function readFromGist() {
+  // Add timestamp to bust GitHub's CDN cache (updates within ~30s of Gist change)
+  const url = `${GIST_RAW}?t=${Math.floor(Date.now() / 30000)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Gist HTTP ${res.status}`);
+  const data = await res.json() as Record<string, unknown>;
+  if (!data.windspeed) throw new Error("Gist data missing windspeed");
 
   // Check freshness — reject if older than 15 minutes
   if (data.fetchedAt) {
-    const age = Date.now() - new Date(data.fetchedAt).getTime();
-    if (age > 15 * 60 * 1000) throw new Error(`KV stale (${Math.round(age / 60000)} min old)`);
+    const age = Date.now() - new Date(data.fetchedAt as string).getTime();
+    if (age > 15 * 60 * 1000) throw new Error(`Gist stale (${Math.round(age / 60000)} min old)`);
   }
   return data;
 }
@@ -113,15 +111,15 @@ export async function GET(request: Request) {
 
   const scrapeErrors: string[] = [];
 
-  // 1. Try Vercel KV (populated every 5 min by GitHub Actions)
+  // 1. Try GitHub Gist (populated every 5 min by GitHub Actions)
   try {
-    const data = await readFromKV();
+    const data = await readFromGist();
     return NextResponse.json(
-      { ...data, source: "meteo-tech" },
+      { ...data },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
   } catch (e) {
-    scrapeErrors.push(`KV: ${e}`);
+    scrapeErrors.push(`Gist: ${e}`);
   }
 
   // 2. Try direct scrape (works if not behind Cloudflare / running locally)

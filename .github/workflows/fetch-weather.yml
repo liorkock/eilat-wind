@@ -1,8 +1,8 @@
 name: Fetch Eilat Weather
 
-# Runs every 5 minutes and stores the result in Vercel KV
-# GitHub's servers are not blocked by meteo-tech.co.il's Cloudflare protection
-# Setup: add KV_REST_API_URL and KV_REST_API_TOKEN to GitHub repo secrets
+# Runs every 5 minutes on GitHub's servers (not blocked by Cloudflare)
+# Fetches meteo-tech.co.il station data and stores in a GitHub Gist
+# GIST_TOKEN secret: a GitHub PAT with gist scope
 
 on:
   schedule:
@@ -13,96 +13,94 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch & store Eilat weather
+      - name: Fetch & store Eilat weather in Gist
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: 4f4cb7be778600828312b7b84263c356
         run: |
           node << 'EOF'
           const https = require('https');
           const http = require('http');
-
           const MS_TO_KT = 1.94384;
 
-          function fetch_url(url) {
+          function fetchUrl(url) {
             return new Promise((resolve, reject) => {
               const mod = url.startsWith('https') ? https : http;
-              const req = mod.get(url, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                  'Accept': 'text/html,application/xhtml+xml',
-                  'Accept-Language': 'he-IL,he;q=0.9',
-                  'Referer': 'http://www.meteo-tech.co.il/eilat-yam/',
-                }
-              }, (res) => {
+              const opts = new URL(url);
+              opts.headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml',
+                'Accept-Language': 'he-IL,he;q=0.9',
+                'Referer': 'http://www.meteo-tech.co.il/eilat-yam/',
+              };
+              mod.get(opts, (res) => {
                 if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                  return resolve(fetch_url(res.headers.location));
+                  return resolve(fetchUrl(res.headers.location));
                 }
                 const chunks = [];
                 res.on('data', c => chunks.push(c));
                 res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
-              });
-              req.on('error', reject);
+              }).on('error', reject);
             });
-          }
-
-          function extractTds(html) {
-            const isoDecoded = html.toString('latin1');
-            const tdMatches = [...isoDecoded.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
-            return tdMatches.map(m => m[1].replace(/<[^>]+>/g, '').trim());
           }
 
           function findPressureIdx(vals) {
             return vals.findIndex(v => { const n = parseFloat(v); return !isNaN(n) && n >= 950 && n <= 1100; });
           }
 
+          function extractTds(html) {
+            const text = html.toString('latin1');
+            return [...text.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)]
+              .map(m => m[1].replace(/<[^>]+>/g, '').trim());
+          }
+
           async function parseWeatherPage(url) {
-            const { status, body } = await fetch_url(url);
-            if (status !== 200) throw new Error(`HTTP ${status}`);
+            const { status, body } = await fetchUrl(url);
+            if (status !== 200) throw new Error(`HTTP ${status} from ${url}`);
             const tds = extractTds(body);
-            // Find pressure as anchor
             const pIdx = findPressureIdx(tds);
-            if (pIdx < 2) throw new Error(`No pressure found. TDs: ${tds.slice(0,20).join(',')}`);
-
-            const windspeed = parseFloat(tds[pIdx + 3]);
-            const windgust  = parseFloat(tds[pIdx + 4]);
-            const winddir   = parseFloat(tds[pIdx + 2]);
-            if (isNaN(windspeed) || isNaN(winddir)) throw new Error(`Bad wind values at pIdx=${pIdx}`);
-
+            if (pIdx < 2) throw new Error(`No pressure found. First TDs: ${tds.slice(0,15).join('|')}`);
+            const ws = parseFloat(tds[pIdx + 3]);
+            const wg = parseFloat(tds[pIdx + 4]);
+            const wd = parseFloat(tds[pIdx + 2]);
+            if (isNaN(ws) || isNaN(wd)) throw new Error(`Bad wind at pIdx=${pIdx}: ${tds.slice(pIdx, pIdx+6).join('|')}`);
             const timeCell = tds.find(v => /\d{2}:\d{2}/.test(v)) || '';
             const timeMatch = timeCell.match(/(\d{2}:\d{2})$/);
-
             return {
               time: timeMatch ? timeMatch[1] : timeCell,
               temperature: parseFloat(tds[pIdx - 3]) || null,
-              humidity:    parseFloat(tds[pIdx - 2]) || null,
-              pressure:    parseFloat(tds[pIdx])     || null,
-              winddir,
-              windspeed: Math.round(windspeed * MS_TO_KT * 10) / 10,
-              windgust:  isNaN(windgust) ? null : Math.round(windgust * MS_TO_KT * 10) / 10,
+              humidity: parseFloat(tds[pIdx - 2]) || null,
+              pressure: parseFloat(tds[pIdx]) || null,
+              winddir: wd,
+              windspeed: Math.round(ws * MS_TO_KT * 10) / 10,
+              windgust: isNaN(wg) ? null : Math.round(wg * MS_TO_KT * 10) / 10,
               source: 'meteo-tech',
               fetchedAt: new Date().toISOString(),
             };
           }
 
-          async function storeInKV(data) {
-            const kvUrl = process.env.KV_REST_API_URL;
-            const kvToken = process.env.KV_REST_API_TOKEN;
-            if (!kvUrl || !kvToken) { console.log('KV not configured, skipping store'); return; }
-
-            const payload = JSON.stringify({ value: JSON.stringify(data), ex: 600 });
-            const url = new URL('/set/eilat_weather', kvUrl);
-            await new Promise((resolve, reject) => {
-              const req = https.request(url, {
-                method: 'POST',
+          async function updateGist(data) {
+            const token = process.env.GIST_TOKEN;
+            const gistId = process.env.GIST_ID;
+            if (!token || !gistId) { console.log('GIST_TOKEN or GIST_ID not set'); return; }
+            const payload = JSON.stringify({ files: { 'weather.json': { content: JSON.stringify(data) } } });
+            return new Promise((resolve, reject) => {
+              const req = https.request({
+                hostname: 'api.github.com',
+                path: `/gists/${gistId}`,
+                method: 'PATCH',
                 headers: {
-                  'Authorization': `Bearer ${kvToken}`,
+                  'Authorization': `Bearer ${token}`,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'eilat-wind-actions',
                   'Content-Type': 'application/json',
                   'Content-Length': Buffer.byteLength(payload),
                 }
-              }, res => { res.resume(); res.on('end', resolve); });
+              }, res => { let b=''; res.on('data',d=>b+=d); res.on('end',()=>resolve(res.statusCode)); });
               req.on('error', reject);
               req.write(payload);
               req.end();
             });
-            console.log('Stored in Vercel KV:', JSON.stringify(data));
           }
 
           (async () => {
@@ -114,16 +112,13 @@ jobs:
               try {
                 const data = await parseWeatherPage(url);
                 console.log('Parsed:', JSON.stringify(data));
-                await storeInKV(data);
+                const status = await updateGist(data);
+                console.log('Gist update status:', status);
                 process.exit(0);
               } catch (e) {
                 console.error(`Failed ${url}: ${e.message}`);
               }
             }
-            console.error('All sources failed');
             process.exit(1);
           })();
           EOF
-        env:
-          KV_REST_API_URL: ${{ secrets.KV_REST_API_URL }}
-          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
